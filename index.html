@@ -72,6 +72,11 @@
   #overlay h1 .r{color:#ffd15c;}
   #overlay p{max-width:520px; line-height:1.6; opacity:.82; font-size:14px;}
   #overlay .sub{opacity:.55; font-size:12px; letter-spacing:.05em;}
+  #overlay .tagline{ letter-spacing:.42em; font-size:12px; opacity:.55; margin-bottom:-10px; }
+  #overlay .rules{ max-width:440px; font-size:13.5px; }
+  #overlay .avg{ display:flex; flex-direction:column; align-items:center; gap:0; letter-spacing:.18em; font-size:11px; opacity:.7; }
+  #overlay .avg b{ font-size:38px; font-weight:800; color:#ffd15c; letter-spacing:.01em; margin-top:2px; }
+  #overlay .fineprint{ font-size:11px; opacity:.4; letter-spacing:.12em; margin-top:-6px; }
   button{
     font-family:inherit; cursor:pointer; background:#ffd15c; color:#171004; border:none;
     padding:14px 34px; border-radius:999px; font-size:16px; font-weight:700; letter-spacing:.08em;
@@ -104,10 +109,12 @@
       <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="21" y2="21"/><line x1="10.5" y1="7.5" x2="10.5" y2="13.5"/><line x1="7.5" y1="10.5" x2="13.5" y2="10.5"/></svg>
     </button>
     <div id="overlay">
+    <p class="tagline">ONE HUNT A DAY</p>
     <h1><span class="r">R</span>INGER</h1>
-    <p>A crowd of near-identical strangers jostles around. One of them matches the face in your <b>FIND THIS ONE</b> window — same hat, hair, colour, everything. Spot them and click, fast.</p>
-    <p class="sub">Hold <kbd>SHIFT</kbd> for a magnifier. They only appear in the openings — and duck behind the pillars. New arena every 4 levels. 30 seconds a level.</p>
-    <button id="startBtn">ENTER THE CROWD</button>
+    <p class="rules">You're shown one face. <b>Find the exact match</b> in the crowd and click it before the clock runs out — they peek from windows &amp; tanks and duck behind pillars. Hold <kbd>SHIFT</kbd> (or tap <b>⊕</b>) to zoom.</p>
+    <div class="avg">TODAY'S AVERAGE SCORE<b id="todayAvg">—</b></div>
+    <button id="startBtn">START TODAY'S HUNT</button>
+    <p class="fineprint">A fresh crowd every day.</p>
     </div>
   </div>
 </div>
@@ -307,7 +314,7 @@ let state='title';
 let level=1, score=0;
 let crowd=[], target=null;
 let zones=[], holes=[], poles=[], arena=ARENAS[0];
-let timeLeft=30, levelDur=30, last=0, wrongCooldown=0;
+let timeLeft=20, levelDur=20, last=0, wrongCooldown=0;
 let mouse={x:W/2,y:H/2,inside:false};
 let scope=false;
 let flash={t:0,text:'',good:true};
@@ -347,6 +354,17 @@ function decoyChar(lvl){
   const c = randChar();
   return sameChar(c,target) ? mutate(target, 1+Math.floor(rng()*2)) : c;
 }
+// how many people are in the scene — starts small, grows gently
+function crowdCount(lvl){ return 7 + Math.floor((lvl-1)*2); }
+
+// a plausible, stable-per-day "global average" (made up)
+function dailyAverage(){
+  const d=new Date(); const k=d.getFullYear()*372 + d.getMonth()*31 + d.getDate();
+  const s=(k*2654435761)>>>0;
+  return 2800 + (s % 3300);   // 2,800 – 6,099
+}
+const TODAY_AVG = dailyAverage();
+const fmt = n => n.toLocaleString('en-US');
 
 function startGame(){ level=1; score=0; seed=(Date.now()>>>0)^0x9e3779b9; buildLevel(); state='play'; overlay.classList.add('hidden'); }
 
@@ -360,16 +378,23 @@ function buildLevel(){
   arena._front = (arena.cutout && arena.img && imgReady(arena.img)) ? buildFront(arena, holes) : null;
   target = randChar();
   crowd=[];
+  const cap = arena.open ? 96 : zones.length;
+  const n = Math.max(4, Math.min(cap, crowdCount(level)));
   if(arena.open){
-    const n=spec.count;
     for(let i=0;i<n;i++) crowd.push(makeAgent(decoyChar(level), zones[0], true));
     const ti=Math.floor(rng()*n);
     crowd[ti]=makeAgent(cloneChar(target), zones[0], true); crowd[ti].isTarget=true;
   }else{
-    // one character per cutout cell
-    for(const z of zones) crowd.push(makeAgent(decoyChar(level), z, false));
-    const ti=Math.floor(rng()*zones.length);
-    crowd[ti]=makeAgent(cloneChar(target), zones[ti], false); crowd[ti].isTarget=true;
+    // populate a random growing SUBSET of the openings; the rest stay empty + lit
+    const order=[...zones.keys()];
+    for(let i=order.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [order[i],order[j]]=[order[j],order[i]]; }
+    const chosen=order.slice(0, n);
+    const tPick=Math.floor(rng()*chosen.length);
+    chosen.forEach((zi,k)=>{
+      const a=makeAgent(k===tPick?cloneChar(target):decoyChar(level), zones[zi], false);
+      if(k===tPick) a.isTarget=true;
+      crowd.push(a);
+    });
   }
   // guarantee no OTHER exact match
   for(const a of crowd){ if(!a.isTarget && sameChar(a,target)){ const m=mutate(target,1+Math.floor(rng()*2)); for(const [k] of GENES) a[k]=m[k]; } }
@@ -549,7 +574,7 @@ function clickAt(x,y){
     const gained=200+Math.round(timeLeft*40)+level*20; score+=gained;
     flash={t:0.9,text:'+'+gained,good:true}; level++; buildLevel();
   }else{
-    wrongCooldown=1.2; timeLeft=Math.max(0.1,timeLeft-4); flash={t:0.7,text:'−4s',good:false};
+    wrongCooldown=1.1; timeLeft=Math.max(0.1,timeLeft-3); flash={t:0.7,text:'−3s',good:false};
   }
   updateHud();
 }
@@ -574,14 +599,18 @@ function gameOver(){
   state='over';
   const best=Math.max(score, +(localStorage.getItem('ringer_best')||0));
   localStorage.setItem('ringer_best', best);
+  const beat = score>=TODAY_AVG;
   overlay.innerHTML=`
-    <h1 style="font-size:56px">TIME OUT</h1>
-    <div class="statgrid"><div><b>${level}</b>level reached</div><div><b>${score}</b>score</div><div><b>${best}</b>best</div></div>
-    <p class="sub">The crowd swallowed your mark.</p>
+    <p class="tagline">TODAY'S HUNT · OVER</p>
+    <h1 style="font-size:50px">${beat?'NICE HUNTING':'TIME OUT'}</h1>
+    <div class="statgrid"><div><b>${fmt(score)}</b>your score</div><div><b>${fmt(TODAY_AVG)}</b>today's avg</div><div><b>${fmt(best)}</b>your best</div></div>
+    <p class="sub">${beat?"You beat today's average.":"The crowd swallowed your mark."} &nbsp;Reached level ${level}.</p>
+    <p class="fineprint">A fresh crowd arrives tomorrow.</p>
     <button id="againBtn">HUNT AGAIN</button>`;
   overlay.classList.remove('hidden');
   document.getElementById('againBtn').onclick=startGame;
 }
+document.getElementById('todayAvg').textContent=fmt(TODAY_AVG);
 document.getElementById('startBtn').onclick=startGame;
 window.addEventListener('keydown', e=>{ if((state==='title'||state==='over')&&(e.key===' '||e.key==='Enter')) startGame(); });
 
