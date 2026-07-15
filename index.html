@@ -345,12 +345,12 @@ const ARENAS = [
   { // ---- 1. ROWHOUSE : crowd only appears in the painted windows + door ----
     name:'Night Windows', cutout:true, img:'ringer_building', frameInset:8, scrim:'rgba(14,14,26,0.34)',
     build(){
-      const cols=[163,285,405,535,665,785,907];
-      const rows=[34,157,287];                         // top-left y of the three occupied window rows
-      const wOf=i=> (i===3?104:82);
+      // measured from the art (pixel-detected window openings)
+      const cols=[[114,79],[234,78],[348,75],[455,106],[596,69],[700,83],[814,83]]; // [x, w]
+      const rows=[[32,94],[151,94],[272,93]];                                        // [y, h] — top three floors
       const z=[];
-      for(const y of rows) cols.forEach((cx,i)=>{ const w=wOf(i); z.push({x:cx-w/2, y, w, h:104}); });
-      z.push({x:482, y:452, w:112, h:166, door:true}); // central doorway
+      for(const [y,h] of rows) for(const [x,w] of cols) z.push({x,y,w,h});
+      z.push({x:449, y:445, w:118, h:165, door:true});                               // central doorway
       return { zones:z, poles:[], count:z.length };
     },
     paintFallback(g){
@@ -380,7 +380,11 @@ const ARENAS = [
   { // ---- 3. AQUARIUM : crowd only appears inside the glowing tanks ----
     name:'The Aquarium', cutout:true, img:'ringer_aquarium', frameInset:6,
     build(){
-      const z=[]; for(let r=0;r<3;r++) for(let c=0;c<8;c++) z.push({x:78+114*c, y:152+131*r, w:102, h:95});
+      // measured from the art — tanks have slight perspective (edge tanks wider)
+      const cx=[136,254,360,458,540,638,744,862];
+      const rows=[[144,84],[274,82],[393,78]];  // [y, h]
+      const w=84; const z=[];
+      for(const [y,h] of rows) for(const c of cx) z.push({x:c-w/2, y, w, h});
       return { zones:z, poles:[], count:z.length };
     },
     paintFallback(g){
