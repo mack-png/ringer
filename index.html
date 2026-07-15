@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>RINGER — find the one in the crowd</title>
+<style>
+  :root{ --paper:#f4efe6; }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:#0b0d12; color:var(--paper);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden; user-select:none; -webkit-user-select:none; touch-action:none;
+  }
+  #wrap{
+    position:relative; width:min(100vw, 1000px); max-height:100vh;
+    display:flex; flex-direction:column; gap:8px; padding:8px;
+  }
+  #stage{ position:relative; width:100%; aspect-ratio: 5 / 3; }
+  #game{
+    position:absolute; inset:0; width:100%; height:100%;
+    border-radius:14px; cursor: crosshair;
+    box-shadow:0 20px 60px rgba(0,0,0,.55);
+  }
+
+  /* HUD bar sits ABOVE the game, never over it */
+  #hud{ display:flex; gap:8px; align-items:stretch; }
+  .panel{
+    background:rgba(10,12,18,.72); backdrop-filter: blur(6px);
+    border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:8px 12px;
+  }
+  #target{ display:flex; flex-direction:row; align-items:center; gap:12px; padding:6px 14px 6px 6px; }
+  #targetCanvas{
+    display:block; flex:none; width:64px; height:64px;
+    border-radius:10px;
+    background:radial-gradient(circle at 50% 35%, #2a3550, #141824);
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.12);
+  }
+  .targetText{ text-align:left; }
+  .targetText b{font-size:12px; letter-spacing:.18em; opacity:.75; display:block; margin-bottom:2px;}
+  .targetText small{font-size:10px; opacity:.5;}
+  #stats{ margin-left:auto; text-align:right; line-height:1.4; min-width:150px; display:flex; flex-direction:column; justify-content:center; }
+  #stats .big{font-size:26px; font-weight:700;}
+  #timebar{ position:relative; height:7px; margin-top:6px; background:rgba(255,255,255,.12); border-radius:4px; overflow:hidden; }
+  #timefill{ position:absolute; inset:0; transform-origin:left; background:linear-gradient(90deg,#4ade80,#a3e635); transition:transform .1s linear; }
+  #worldTag{ position:absolute; bottom:10px; left:12px; z-index:5; font-size:11px; letter-spacing:.22em; opacity:.55; pointer-events:none; text-transform:uppercase; }
+  #hint{ position:absolute; bottom:10px; right:12px; z-index:5; font-size:11px; letter-spacing:.08em; opacity:.5; pointer-events:none; }
+  #zoomBtn{
+    display:none; position:absolute; bottom:16px; right:16px; z-index:8;
+    width:62px; height:62px; padding:0; border-radius:50%;
+    align-items:center; justify-content:center;
+    background:rgba(16,19,26,.66); color:#f4efe6;
+    border:1.5px solid rgba(255,255,255,.28); box-shadow:0 6px 18px rgba(0,0,0,.45);
+    -webkit-tap-highlight-color:transparent;
+  }
+  #zoomBtn.on{ background:#ffd15c; color:#171004; border-color:#ffd15c; box-shadow:0 0 18px rgba(255,209,92,.6); }
+  #zoomBtn:active{ transform:scale(.94); }
+  @media (pointer: coarse){ #zoomBtn{ display:flex; } #hint{ display:none; } }
+  kbd{ background:rgba(255,255,255,.14); border-radius:4px; padding:1px 6px; font-size:11px; border:1px solid rgba(255,255,255,.15); }
+
+  #overlay{
+    position:absolute; inset:0; z-index:20;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; gap:16px;
+    background:radial-gradient(circle at 50% 40%, rgba(20,26,44,.82), rgba(6,8,12,.94));
+    border-radius:14px; backdrop-filter: blur(3px);
+  }
+  #overlay.hidden{display:none;}
+  #overlay h1{ font-size:clamp(40px,9vw,88px); letter-spacing:.14em; font-weight:800; text-shadow:0 4px 30px rgba(120,180,255,.3); }
+  #overlay h1 .r{color:#ffd15c;}
+  #overlay p{max-width:520px; line-height:1.6; opacity:.82; font-size:14px;}
+  #overlay .sub{opacity:.55; font-size:12px; letter-spacing:.05em;}
+  button{
+    font-family:inherit; cursor:pointer; background:#ffd15c; color:#171004; border:none;
+    padding:14px 34px; border-radius:999px; font-size:16px; font-weight:700; letter-spacing:.08em;
+    box-shadow:0 8px 24px rgba(255,209,92,.35); transition:transform .08s ease;
+  }
+  button:active{transform:translateY(2px) scale(.98);}
+  .statgrid{display:flex; gap:26px; opacity:.85; font-size:13px;}
+  .statgrid b{display:block; font-size:24px; margin-bottom:2px;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <div class="panel" id="target">
+      <canvas id="targetCanvas" width="192" height="192"></canvas>
+      <div class="targetText"><b>FIND THIS ONE</b><small>click them in the crowd</small></div>
+    </div>
+    <div class="panel" id="stats">
+      <div>LVL <span id="lvl">1</span> · <span id="score" class="big">0</span></div>
+      <div style="font-size:11px;opacity:.6">crowd <span id="count">0</span></div>
+      <div id="timebar"><div id="timefill"></div></div>
+    </div>
+  </div>
+
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="worldTag">— · —</div>
+    <div id="hint">hold <kbd>SHIFT</kbd> to zoom</div>
+    <button id="zoomBtn" aria-label="toggle zoom">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="21" y2="21"/><line x1="10.5" y1="7.5" x2="10.5" y2="13.5"/><line x1="7.5" y1="10.5" x2="13.5" y2="10.5"/></svg>
+    </button>
+    <div id="overlay">
+    <h1><span class="r">R</span>INGER</h1>
+    <p>A crowd of near-identical strangers jostles around. One of them matches the face in your <b>FIND THIS ONE</b> window — same hat, hair, colour, everything. Spot them and click, fast.</p>
+    <p class="sub">Hold <kbd>SHIFT</kbd> for a magnifier. They only appear in the openings — and duck behind the pillars. New arena every 4 levels. 30 seconds a level.</p>
+    <button id="startBtn">ENTER THE CROWD</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+const tcv = document.getElementById('targetCanvas');
+const tctx = tcv.getContext('2d');
+
+const W = 1000, H = 600;
+let DPR = Math.min(window.devicePixelRatio || 1, 2);
+function fit(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = W*DPR; cv.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+fit(); window.addEventListener('resize', fit);
+
+// ---------- rng ----------
+let seed = 1234567;
+function rng(){ seed=(seed*1664525+1013904223)>>>0; return seed/4294967296; }
+function pick(a){ return a[Math.floor(rng()*a.length)]; }
+
+// ---------- character genetics ----------
+const SKIN  = ['#f2c9a0','#e0a878','#c78b5c','#9c6b43','#6f492e','#8fd0c0','#d9a3c9','#f7dcc0','#b5764a'];
+const SHIRT = ['#e94f5b','#f6a623','#2ecc71','#3498db','#9b59b6','#ecf0f1','#34495e','#1abc9c','#e84393','#fd79a8','#16a085','#d35400','#2c3e50','#f5d020','#7f8c8d'];
+const HAIRC = ['#2b2b2b','#6b3f1d','#c9932f','#d94f2a','#e8e2d0','#7a7f87','#5b3a8a'];
+const HATC  = ['#c0392b','#2980b9','#27ae60','#f1c40f','#8e44ad','#111418','#ecf0f1','#e67e22'];
+const HATS  = ['none','none','cap','beanie','top','cone','crown','band','bucket','visor'];
+const HAIRS = ['bald','short','side','mohawk','pony','afro','bun','spiky'];
+const FACE  = ['none','none','glasses','shades','stache','beard','blush'];
+const GENES = [['skin',SKIN],['shirt',SHIRT],['hair',HAIRS],['hairc',HAIRC],['hat',HATS],['hatc',HATC],['face',FACE]];
+
+function randChar(){ const c={}; for(const [k,pool] of GENES) c[k]=pick(pool); return c; }
+function sameChar(a,b){ for(const [k] of GENES) if(a[k]!==b[k]) return false; return true; }
+function cloneChar(c){ const o={}; for(const [k] of GENES) o[k]=c[k]; return o; }
+function mutate(base, diffs){
+  const c=cloneChar(base); const idx=[...GENES.keys()];
+  for(let i=idx.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [idx[i],idx[j]]=[idx[j],idx[i]]; }
+  let changed=0;
+  for(const gi of idx){
+    if(changed>=diffs) break;
+    const [k,pool]=GENES[gi]; let nv=c[k],t=0;
+    while(nv===c[k]&&t<10){ nv=pick(pool); t++; }
+    if(nv!==c[k]){ c[k]=nv; changed++; }
+  }
+  if(changed===0){ const [k,pool]=GENES[Math.floor(rng()*GENES.length)]; let nv=c[k],t=0; while(nv===c[k]&&t<10){nv=pick(pool);t++;} c[k]=nv; }
+  return c;
+}
+
+// ---------- drawing a character ----------
+function drawChar(g,c,x,y,s,bob){
+  bob=bob||0; g.save(); g.translate(x, y+bob);
+  g.fillStyle='rgba(0,0,0,.18)'; g.beginPath(); g.ellipse(0,20*s,13*s,4.5*s,0,0,7); g.fill();
+  g.fillStyle=c.shirt; roundRect(g,-11*s,2*s,22*s,20*s,6*s); g.fill();
+  g.fillStyle=shade(c.shirt,-18);
+  roundRect(g,-13*s,4*s,4*s,14*s,3*s); g.fill(); roundRect(g,9*s,4*s,4*s,14*s,3*s); g.fill();
+  g.fillStyle=c.skin; g.beginPath(); g.arc(0,-7*s,11*s,0,7); g.fill();
+  drawHair(g,c,s);
+  g.fillStyle='#20242c';
+  if(c.face!=='shades'&&c.face!=='glasses'){ g.beginPath(); g.arc(-4*s,-8*s,1.5*s,0,7); g.arc(4*s,-8*s,1.5*s,0,7); g.fill(); }
+  drawFace(g,c,s); drawHat(g,c,s);
+  g.restore();
+}
+function drawHair(g,c,s){
+  if(c.hair==='bald') return;
+  g.fillStyle=c.hairc;
+  const cap=(x,w)=>{ g.beginPath(); g.arc(0,-7*s,11*s,Math.PI,0); g.fill(); g.fillRect(x,-9*s,w,4*s); };
+  switch(c.hair){
+    case 'short': cap(-11*s,22*s); break;
+    case 'side':  cap(-11*s,22*s); g.fillRect(-12*s,-9*s,4*s,10*s); break;
+    case 'mohawk':g.fillRect(-2.5*s,-22*s,5*s,12*s); break;
+    case 'pony':  cap(-11*s,22*s); g.beginPath(); g.ellipse(11*s,-4*s,4*s,8*s,0,0,7); g.fill(); break;
+    case 'afro':  g.beginPath(); g.arc(0,-9*s,14*s,Math.PI,0); g.fill(); g.beginPath(); g.arc(-9*s,-8*s,6*s,0,7); g.arc(9*s,-8*s,6*s,0,7); g.fill(); break;
+    case 'bun':   cap(-11*s,22*s); g.beginPath(); g.arc(0,-19*s,4.5*s,0,7); g.fill(); break;
+    case 'spiky': cap(-11*s,22*s); for(let i=-2;i<=2;i++){ g.beginPath(); g.moveTo(i*4.4*s-3*s,-14*s); g.lineTo(i*4.4*s,-22*s); g.lineTo(i*4.4*s+3*s,-14*s); g.closePath(); g.fill(); } break;
+  }
+}
+function drawFace(g,c,s){
+  g.strokeStyle='#20242c'; g.fillStyle='#20242c'; g.lineWidth=1.4*s;
+  switch(c.face){
+    case 'glasses': g.beginPath(); g.arc(-4*s,-8*s,2.6*s,0,7); g.arc(4*s,-8*s,2.6*s,0,7); g.stroke(); g.beginPath(); g.moveTo(-1.4*s,-8*s); g.lineTo(1.4*s,-8*s); g.stroke(); break;
+    case 'shades': g.fillRect(-7*s,-10*s,6*s,4*s); g.fillRect(1*s,-10*s,6*s,4*s); g.fillRect(-1*s,-9*s,2*s,1.4*s); break;
+    case 'stache': g.fillRect(-4*s,-2.5*s,8*s,2.2*s); break;
+    case 'beard':  g.beginPath(); g.arc(0,-4*s,8*s,0.15,Math.PI-0.15); g.fill(); break;
+    case 'blush':  g.fillStyle='rgba(233,120,140,.55)'; g.beginPath(); g.arc(-6*s,-5*s,2.6*s,0,7); g.arc(6*s,-5*s,2.6*s,0,7); g.fill(); break;
+  }
+}
+function drawHat(g,c,s){
+  if(c.hat==='none') return; g.fillStyle=c.hatc;
+  switch(c.hat){
+    case 'cap':    g.beginPath(); g.arc(0,-16*s,10*s,Math.PI,0); g.fill(); g.fillRect(-12*s,-16.5*s,14*s,3*s); break;
+    case 'beanie': g.beginPath(); g.arc(0,-15*s,10.5*s,Math.PI,0); g.fill(); g.fillRect(-10.5*s,-15*s,21*s,4*s); g.fillStyle=shade(c.hatc,20); g.beginPath(); g.arc(0,-25*s,2.4*s,0,7); g.fill(); break;
+    case 'top':    g.fillRect(-11*s,-16*s,22*s,3*s); g.fillRect(-7*s,-28*s,14*s,13*s); break;
+    case 'cone':   g.beginPath(); g.moveTo(0,-30*s); g.lineTo(-9*s,-14*s); g.lineTo(9*s,-14*s); g.closePath(); g.fill(); break;
+    case 'crown':  g.beginPath(); g.moveTo(-10*s,-14*s); g.lineTo(-10*s,-22*s); g.lineTo(-5*s,-17*s); g.lineTo(0,-24*s); g.lineTo(5*s,-17*s); g.lineTo(10*s,-22*s); g.lineTo(10*s,-14*s); g.closePath(); g.fill(); break;
+    case 'band':   g.fillRect(-11*s,-16*s,22*s,3.4*s); break;
+    case 'bucket': g.beginPath(); g.arc(0,-15*s,10*s,Math.PI,0); g.fill(); g.beginPath(); g.moveTo(-13*s,-15*s); g.quadraticCurveTo(0,-9*s,13*s,-15*s); g.lineTo(11*s,-12*s); g.quadraticCurveTo(0,-6*s,-11*s,-12*s); g.closePath(); g.fill(); break;
+    case 'visor':  g.fillStyle=shade(c.hatc,10); g.fillRect(-11*s,-16*s,22*s,4*s); g.fillStyle=c.hatc; g.beginPath(); g.moveTo(-12*s,-14*s); g.quadraticCurveTo(-14*s,-9*s,-8*s,-8*s); g.lineTo(-8*s,-13*s); g.closePath(); g.fill(); break;
+  }
+}
+function roundRect(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+function shade(hex,amt){ const n=parseInt(hex.slice(1),16); let r=(n>>16)+amt,gg=((n>>8)&255)+amt,b=(n&255)+amt; r=Math.max(0,Math.min(255,r));gg=Math.max(0,Math.min(255,gg));b=Math.max(0,Math.min(255,b)); return '#'+(r<<16|gg<<8|b).toString(16).padStart(6,'0'); }
+
+// ==================================================================
+//  ARENAS — each defines cutout zones (crowd clipped to these) and
+//  occluders/poles (drawn in front; clicks on them are blocked).
+//  A background image can be dropped in later; procedural paint used
+//  as fallback and to guarantee zones line up.
+// ==================================================================
+function grid(count, area, cellAspect){
+  // returns `count` evenly spaced cell rects inside area {x,y,w,h}
+  cellAspect = cellAspect||0.8; // w/h
+  const cols = Math.max(1, Math.round(Math.sqrt(count * (area.w/area.h) / cellAspect)));
+  const rows = Math.ceil(count/cols);
+  const gapx = area.w*0.06/cols + 10, gapy = area.h*0.08/rows + 12;
+  const cw = (area.w - gapx*(cols+1))/cols;
+  const ch = (area.h - gapy*(rows+1))/rows;
+  const cells=[]; let n=0;
+  for(let r=0;r<rows;r++){
+    const inRow = Math.min(cols, count-r*cols);
+    const rowW = inRow*cw + (inRow-1)*gapx;
+    const x0 = area.x + (area.w-rowW)/2;
+    for(let c=0;c<inRow;c++){
+      cells.push({ x:x0 + c*(cw+gapx), y:area.y+gapy + r*(ch+gapy), w:cw, h:ch });
+      if(++n>=count) break;
+    }
+  }
+  return cells;
+}
+
+const ARENAS = [
+  { // ---- 1. ROWHOUSE : crowd only appears in the painted windows + door ----
+    name:'Night Windows', cutout:true, img:'ringer_building', frameInset:8, scrim:'rgba(14,14,26,0.34)',
+    build(){
+      const cols=[163,285,405,535,665,785,907];
+      const rows=[34,157,287];                         // top-left y of the three occupied window rows
+      const wOf=i=> (i===3?104:82);
+      const z=[];
+      for(const y of rows) cols.forEach((cx,i)=>{ const w=wOf(i); z.push({x:cx-w/2, y, w, h:104}); });
+      z.push({x:482, y:452, w:112, h:166, door:true}); // central doorway
+      return { zones:z, poles:[], count:z.length };
+    },
+    paintFallback(g){
+      g.fillStyle='#243b6b'; g.fillRect(0,0,W,H*0.30);
+      const brick=g.createLinearGradient(0,H*0.15,0,H); brick.addColorStop(0,'#b0503f'); brick.addColorStop(1,'#8a3a2e');
+      g.fillStyle=brick; g.fillRect(0,H*0.15,W,H);
+      for(const z of zones){ g.fillStyle='#efe3cf'; roundRect(g,z.x-6,z.y-6,z.w+12,z.h+12,8); g.fill(); g.fillStyle=z.door?'#2a1c15':'#141a26'; roundRect(g,z.x,z.y,z.w,z.h,6); g.fill(); }
+    }
+  },
+  { // ---- 2. STATION : open platform, crowd walks BEHIND the columns ----
+    name:'Central Station', cutout:false, open:true, img:'ringer_station', hasTrain:true,
+    build(level){
+      const floor={x:26, y:206, w:948, h:170};
+      const poles=[100,305,520,730,950].map(cx=>({x:cx-44, y:120, w:88, h:260}));
+      return { zones:[floor], poles, count:Math.min(150, 26+level*8) };
+    },
+    paintFallback(g){
+      const wall=g.createLinearGradient(0,0,0,H*0.5); wall.addColorStop(0,'#2c3550'); wall.addColorStop(1,'#4a5a7d');
+      g.fillStyle=wall; g.fillRect(0,0,W,H*0.55);
+      const floorG=g.createLinearGradient(0,H*0.5,0,H); floorG.addColorStop(0,'#cfd6dd'); floorG.addColorStop(1,'#9aa3ad');
+      g.fillStyle=floorG; g.fillRect(0,H*0.5,W,H*0.5);
+    },
+    poleFallback(g){
+      for(const p of poles){ const grd=g.createLinearGradient(p.x,0,p.x+p.w,0); grd.addColorStop(0,'#5a636e'); grd.addColorStop(.5,'#aeb7c1'); grd.addColorStop(1,'#5a636e'); g.fillStyle=grd; g.fillRect(p.x,p.y,p.w,p.h); }
+    }
+  },
+  { // ---- 3. AQUARIUM : crowd only appears inside the glowing tanks ----
+    name:'The Aquarium', cutout:true, img:'ringer_aquarium', frameInset:6,
+    build(){
+      const z=[]; for(let r=0;r<3;r++) for(let c=0;c<8;c++) z.push({x:78+114*c, y:152+131*r, w:102, h:95});
+      return { zones:z, poles:[], count:z.length };
+    },
+    paintFallback(g){
+      const room=g.createLinearGradient(0,0,0,H); room.addColorStop(0,'#0a1420'); room.addColorStop(1,'#04080e');
+      g.fillStyle=room; g.fillRect(0,0,W,H);
+      for(const z of zones){ const water=g.createLinearGradient(0,z.y,0,z.y+z.h); water.addColorStop(0,'#1f8fb0'); water.addColorStop(1,'#0e5f86'); g.fillStyle=water; roundRect(g,z.x,z.y,z.w,z.h,8); g.fill(); }
+    }
+  },
+];
+function arenaFor(level){ return ARENAS[Math.floor((level-1)/4)%ARENAS.length]; }
+
+// paint an arena background: MJ image if loaded, else procedural fallback
+function paintArena(g){ if(arena.img && imgReady(arena.img)) g.drawImage(IMAGES[arena.img],0,0,W,H); else arena.paintFallback(g); }
+// occluders (station columns) — redraw the column slice of the MJ image in front of the crowd
+function paintOccluders(g){
+  if(!poles.length) return;
+  if(arena.img && imgReady(arena.img)){
+    const im=IMAGES[arena.img], kx=im.naturalWidth/W, ky=im.naturalHeight/H;
+    for(const p of poles) g.drawImage(im, p.x*kx, p.y*ky, p.w*kx, p.h*ky, p.x, p.y, p.w, p.h);
+  } else if(arena.poleFallback){ arena.poleFallback(g); }
+}
+
+// ---------- game state ----------
+let state='title';
+let level=1, score=0;
+let crowd=[], target=null;
+let zones=[], holes=[], poles=[], arena=ARENAS[0];
+let timeLeft=30, levelDur=30, last=0, wrongCooldown=0;
+let mouse={x:W/2,y:H/2,inside:false};
+let scope=false;
+let flash={t:0,text:'',good:true};
+let train={active:false, x:0, dir:1, speed:840, len:1360, cool:0};
+const TRAIN_Y=158, TRAIN_H=224;
+
+const buf=document.createElement('canvas'); buf.width=W; buf.height=H;
+const bctx=buf.getContext('2d');
+
+const DEBUG = location.search.includes('debug');
+const IMAGES = {};
+for(const n of ['ringer_building','ringer_station','ringer_aquarium']){ const im=new Image(); im.src='levels/'+n+'.png'; IMAGES[n]=im; }
+function imgReady(n){ const im=IMAGES[n]; return im && im.complete && im.naturalWidth>0; }
+function insetZone(z,f){ return {x:z.x+f, y:z.y+f, w:Math.max(2,z.w-2*f), h:Math.max(2,z.h-2*f), door:z.door}; }
+// A "front" layer: the facade image with the openings punched transparent, so
+// the crowd (drawn behind it) shows only THROUGH the holes and is occluded by
+// the wall + frames — a real cutout, not people pasted in front.
+function buildFront(arena, holeRects){
+  const c=document.createElement('canvas'); c.width=W; c.height=H; const g=c.getContext('2d');
+  g.drawImage(IMAGES[arena.img],0,0,W,H);
+  g.globalCompositeOperation='destination-out';
+  for(const h of holeRects){ roundRect(g,h.x,h.y,h.w,h.h, h.door?6:5); g.fill(); }
+  return c;
+}
+
+function similarity(lvl){
+  const t=lvl/24;
+  if(rng()<0.15+Math.min(.35,t)) return 1;
+  if(rng()<0.5) return 2;
+  return 2+Math.floor(rng()*3);
+}
+// Most of the crowd are diverse random strangers; a fraction are close
+// "ringers" that share most genes with the target (the real challenge).
+function decoyChar(lvl){
+  const ringerChance = 0.22 + Math.min(0.20, lvl/60);
+  if(rng()<ringerChance) return mutate(target, similarity(lvl));
+  const c = randChar();
+  return sameChar(c,target) ? mutate(target, 1+Math.floor(rng()*2)) : c;
+}
+
+function startGame(){ level=1; score=0; seed=(Date.now()>>>0)^0x9e3779b9; buildLevel(); state='play'; overlay.classList.add('hidden'); }
+
+function buildLevel(){
+  arena = arenaFor(level);
+  const spec = arena.build(level);
+  zones = spec.zones; poles = spec.poles||[];
+  // openings (inner holes) for cutout arenas — crowd shows only through these
+  if(arena.cutout){ const f=arena.frameInset||7; holes = zones.map(z=>insetZone(z, z.door?f+2:f)); }
+  else holes = zones;
+  arena._front = (arena.cutout && arena.img && imgReady(arena.img)) ? buildFront(arena, holes) : null;
+  target = randChar();
+  crowd=[];
+  if(arena.open){
+    const n=spec.count;
+    for(let i=0;i<n;i++) crowd.push(makeAgent(decoyChar(level), zones[0], true));
+    const ti=Math.floor(rng()*n);
+    crowd[ti]=makeAgent(cloneChar(target), zones[0], true); crowd[ti].isTarget=true;
+  }else{
+    // one character per cutout cell
+    for(const z of zones) crowd.push(makeAgent(decoyChar(level), z, false));
+    const ti=Math.floor(rng()*zones.length);
+    crowd[ti]=makeAgent(cloneChar(target), zones[ti], false); crowd[ti].isTarget=true;
+  }
+  // guarantee no OTHER exact match
+  for(const a of crowd){ if(!a.isTarget && sameChar(a,target)){ const m=mutate(target,1+Math.floor(rng()*2)); for(const [k] of GENES) a[k]=m[k]; } }
+  timeLeft=levelDur; wrongCooldown=0;
+  train.active=false; train.cool = 4 + rng()*6;   // first train after a few seconds
+  drawTargetWindow(); updateHud();
+}
+
+function makeAgent(c, zone, roam){
+  // scale to fit the zone (for cutout cells) or free size (open floor)
+  let s;
+  if(roam){ s = 0.82+rng()*0.34; }
+  else{ s = Math.min(zone.h*0.62/54, zone.w*0.9/26); s=Math.max(0.5,Math.min(1.12,s)); }
+  const padX=13*s, padTop=30*s, padBot=22*s;
+  const a={ ...c, zone, roam, s, padX, padTop, padBot,
+    phase:rng()*Math.PI*2, spd:0.6+rng()*0.8 };
+  // place inside zone
+  const rx = Math.max(zone.x+padX, Math.min(zone.x+zone.w-padX, zone.x+padX+rng()*(zone.w-2*padX)));
+  const ry = Math.max(zone.y+padTop, Math.min(zone.y+zone.h-padBot, zone.y+padTop+rng()*(zone.h-padTop-padBot)));
+  a.x=rx; a.y=ry;
+  a.vx=(rng()-0.5)*(roam?22:10); a.vy=(rng()-0.5)*(roam?22:10);
+  return a;
+}
+
+function drawTargetWindow(){
+  tctx.setTransform(1,0,0,1,0,0); tctx.clearRect(0,0,192,192);
+  tctx.save(); tctx.translate(96,118); drawChar(tctx,target,0,0,3.4,0); tctx.restore();
+}
+function updateHud(){
+  document.getElementById('lvl').textContent=level;
+  document.getElementById('score').textContent=score;
+  document.getElementById('count').textContent=crowd.length;
+  document.getElementById('worldTag').textContent='Arena '+(Math.floor((level-1)/4)+1)+' · '+arena.name;
+}
+
+// ---------- loop ----------
+function loop(ts){ const dt=Math.min(0.05,(ts-last)/1000)||0; last=ts; if(state==='play') update(dt); render(ts/1000); requestAnimationFrame(loop); }
+function update(dt){
+  timeLeft-=dt;
+  if(wrongCooldown>0) wrongCooldown-=dt;
+  if(flash.t>0) flash.t-=dt;
+  if(timeLeft<=0){ gameOver(); return; }
+  const maxS = 26;
+  for(const a of crowd){
+    a.x+=a.vx*dt; a.y+=a.vy*dt;
+    const wob = a.roam?40:26;
+    a.vx+=(rng()-0.5)*wob*dt; a.vy+=(rng()-0.5)*wob*dt;
+    const sp=Math.hypot(a.vx,a.vy), m=a.roam?maxS:14;
+    if(sp>m){ a.vx=a.vx/sp*m; a.vy=a.vy/sp*m; }
+    // clamp to home zone with padding so the character stays fully framed
+    const z=a.zone;
+    let pl=z.x+a.padX, pr=z.x+z.w-a.padX, pt=z.y+a.padTop, pb=z.y+z.h-a.padBot;
+    if(pr<pl){ pl=pr=z.x+z.w/2; } if(pb<pt){ pt=pb=z.y+z.h-a.padBot; }
+    if(a.x<pl){a.x=pl;a.vx=Math.abs(a.vx);} if(a.x>pr){a.x=pr;a.vx=-Math.abs(a.vx);}
+    if(a.y<pt){a.y=pt;a.vy=Math.abs(a.vy);} if(a.y>pb){a.y=pb;a.vy=-Math.abs(a.vy);}
+  }
+  crowd.sort((p,q)=>p.y-q.y);
+  // a train sweeps across the platform every so often
+  if(arena.hasTrain){
+    if(train.active){
+      train.x += train.dir*train.speed*dt;
+      if((train.dir>0 && train.x>W) || (train.dir<0 && train.x+train.len<0)){ train.active=false; train.cool = 7 + rng()*8; }
+    } else if((train.cool-=dt) <= 0){
+      train.dir = rng()<0.5?1:-1;
+      train.x = train.dir>0 ? -train.len : W;
+      train.active = true;
+    }
+  }
+}
+function drawTrain(g){
+  const x=train.x, len=train.len, y=TRAIN_Y, h=TRAIN_H;
+  g.save();
+  // motion streaks trailing the leading edge
+  g.strokeStyle='rgba(255,255,255,.16)'; g.lineWidth=2;
+  const lead = train.dir>0 ? x+len : x;
+  for(let i=1;i<=5;i++){ const sy=y+8+i*32; g.beginPath(); g.moveTo(lead - train.dir*20, sy); g.lineTo(lead - train.dir*80, sy); g.stroke(); }
+  // ground shadow
+  g.fillStyle='rgba(0,0,0,.30)'; g.fillRect(x, y+h-4, len, 22);
+  // body
+  const bg=g.createLinearGradient(0,y,0,y+h); bg.addColorStop(0,'#e5eaef'); bg.addColorStop(.5,'#b3bcc6'); bg.addColorStop(1,'#7c848e');
+  g.fillStyle=bg; roundRect(g,x,y,len,h,12); g.fill();
+  g.fillStyle='#c9d0d8'; g.fillRect(x, y-6, len, 12);                 // roof
+  g.fillStyle='#12202b'; g.fillRect(x+18, y+24, len-36, 66);          // window band
+  g.fillStyle='#bfe8ff';                                             // lit windows
+  for(let wx=x+30; wx<x+len-46; wx+=70){ roundRect(g,wx, y+30, 46, 52, 4); g.fill(); }
+  g.fillStyle='#e0453f'; g.fillRect(x, y+h*0.66, len, 14);            // livery stripe
+  g.fillStyle='#2b3038';                                             // door seams
+  for(let dx=x+58; dx<x+len-40; dx+=140){ g.fillRect(dx, y+22, 4, h-58); g.fillRect(dx+62, y+22, 4, h-58); }
+  g.restore();
+}
+
+function drawScene(g,t){
+  // lazily build the front layer once the image finishes loading
+  if(arena.cutout && arena.img && !arena._front && imgReady(arena.img)) arena._front=buildFront(arena, holes);
+  const doCut = arena.cutout && arena._front;
+
+  paintArena(g);                                   // base image (glass / glow / water shows behind crowd)
+  if(arena.hasTrain){                               // mute the empty mirror-floor below the platform
+    const mg=g.createLinearGradient(0,H*0.62,0,H); mg.addColorStop(0,'rgba(6,9,14,0)'); mg.addColorStop(1,'rgba(6,9,14,0.72)');
+    g.fillStyle=mg; g.fillRect(0,H*0.62,W,H*0.38);
+  }
+  if(doCut && arena.scrim){                         // optional darkening inside openings for contrast
+    g.fillStyle=arena.scrim; for(const h of holes) g.fillRect(h.x,h.y,h.w,h.h);
+  }
+  // crowd — clipped to the openings
+  g.save();
+  g.beginPath();
+  for(const h of (doCut?holes:zones)) g.rect(h.x,h.y,h.w,h.h);
+  g.clip();
+  for(const a of crowd){ const bob=Math.sin(t*a.spd*3+a.phase)*(a.roam?2.2:1.2); drawChar(g,a,a.x,a.y,a.s,bob); }
+  g.restore();
+  // facade back on top: wall + frames occlude the crowd; the punched holes stay open
+  if(doCut) g.drawImage(arena._front,0,0,W,H);
+  // occluders (station columns) redrawn in front
+  paintOccluders(g);
+  // train sweeps across in front of everything
+  if(arena.hasTrain && train.active) drawTrain(g);
+}
+
+function render(t){
+  drawScene(bctx,t);
+  ctx.setTransform(DPR,0,0,DPR,0,0); ctx.clearRect(0,0,W,H); ctx.drawImage(buf,0,0,W,H);
+  if(wrongCooldown>0){ ctx.fillStyle='rgba(233,79,91,'+(0.18*Math.min(1,wrongCooldown))+')'; ctx.fillRect(0,0,W,H); }
+  if(flash.t>0){
+    ctx.save(); ctx.globalAlpha=Math.min(1,flash.t*2);
+    ctx.fillStyle=flash.good?'#a3e635':'#ff8b8b'; ctx.font='700 26px ui-monospace, monospace'; ctx.textAlign='center';
+    ctx.fillText(flash.text, mouse.x, mouse.y-30-(0.6-flash.t)*40); ctx.restore();
+  }
+  if(scope && mouse.inside && state==='play') drawScope();
+  if(location.search.includes('boxes') && state==='play'){
+    ctx.lineWidth=1.5;
+    ctx.strokeStyle='rgba(0,255,120,.9)'; for(const z of holes) ctx.strokeRect(z.x,z.y,z.w,z.h);
+    ctx.strokeStyle='rgba(255,60,60,.9)'; for(const p of poles) ctx.strokeRect(p.x,p.y,p.w,p.h);
+  }
+  document.getElementById('timefill').style.transform='scaleX('+Math.max(0,timeLeft/levelDur)+')';
+  document.getElementById('timefill').style.background = timeLeft<7 ? 'linear-gradient(90deg,#ff5b5b,#ff9e5b)' : 'linear-gradient(90deg,#4ade80,#a3e635)';
+}
+
+function drawScope(){
+  const R=90, zoom=2.4, mx=mouse.x, my=mouse.y;
+  ctx.save(); ctx.beginPath(); ctx.arc(mx,my,R,0,7); ctx.clip();
+  const sw=(R*2)/zoom, sh=(R*2)/zoom;
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(buf, mx-sw/2, my-sh/2, sw, sh, mx-R, my-R, R*2, R*2);
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(mx,my,R,0,7); ctx.stroke();
+  ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=6; ctx.beginPath(); ctx.arc(mx,my,R+3,0,7); ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.5)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(mx-10,my); ctx.lineTo(mx+10,my); ctx.moveTo(mx,my-10); ctx.lineTo(mx,my+10); ctx.stroke();
+  ctx.restore();
+}
+
+// ---------- input ----------
+function toLogical(e){ const r=cv.getBoundingClientRect(); const px=(e.touches?e.touches[0].clientX:e.clientX)-r.left; const py=(e.touches?e.touches[0].clientY:e.clientY)-r.top; return {x:px/r.width*W, y:py/r.height*H}; }
+cv.addEventListener('mousemove', e=>{ const p=toLogical(e); mouse.x=p.x; mouse.y=p.y; mouse.inside=true; });
+cv.addEventListener('mouseleave', ()=>mouse.inside=false);
+cv.addEventListener('mouseenter', ()=>mouse.inside=true);
+
+function inZones(x,y){ for(const z of holes) if(x>=z.x&&x<=z.x+z.w&&y>=z.y&&y<=z.y+z.h) return true; return false; }
+function inPoles(x,y){ for(const p of poles) if(x>=p.x&&x<=p.x+p.w&&y>=p.y&&y<=p.y+p.h) return true; return false; }
+function hitTest(x,y){
+  if(!inZones(x,y)) return null;         // can only click inside the openings
+  if(inPoles(x,y)) return null;          // pillar blocks the click
+  if(train.active && y>=TRAIN_Y && y<=TRAIN_Y+TRAIN_H && x>=train.x && x<=train.x+train.len) return null; // train blocks
+
+  for(let i=crowd.length-1;i>=0;i--){
+    const a=crowd[i]; const dx=x-a.x, dy=y-(a.y-6*a.s);
+    if(Math.abs(dx)<14*a.s && dy>-26*a.s && dy<24*a.s) return a;
+  }
+  return null;
+}
+function clickAt(x,y){
+  if(state!=='play'||wrongCooldown>0) return;
+  const a=hitTest(x,y); if(!a) return;
+  if(a.isTarget){
+    const gained=200+Math.round(timeLeft*40)+level*20; score+=gained;
+    flash={t:0.9,text:'+'+gained,good:true}; level++; buildLevel();
+  }else{
+    wrongCooldown=1.2; timeLeft=Math.max(0.1,timeLeft-4); flash={t:0.7,text:'−4s',good:false};
+  }
+  updateHud();
+}
+cv.addEventListener('mousedown', e=>{ const p=toLogical(e); clickAt(p.x,p.y); });
+window.addEventListener('keydown', e=>{ if(e.key==='Shift') scope=true; });
+window.addEventListener('keyup',   e=>{ if(e.key==='Shift') scope=false; });
+
+// touch: drag moves the magnifier, a tap selects (so inspecting never mis-clicks)
+let touchStart=null, touchMoved=false;
+cv.addEventListener('touchstart', e=>{ e.preventDefault(); const p=toLogical(e); mouse.x=p.x; mouse.y=p.y; mouse.inside=true; touchStart={x:p.x,y:p.y}; touchMoved=false; }, {passive:false});
+cv.addEventListener('touchmove', e=>{ e.preventDefault(); const p=toLogical(e); if(touchStart && Math.hypot(p.x-touchStart.x,p.y-touchStart.y)>7) touchMoved=true; mouse.x=p.x; mouse.y=p.y; mouse.inside=true; }, {passive:false});
+cv.addEventListener('touchend', e=>{ if(touchStart && !touchMoved) clickAt(touchStart.x, touchStart.y); touchStart=null; });
+
+// on-screen zoom toggle (mobile — replaces the SHIFT key)
+const zoomBtn=document.getElementById('zoomBtn');
+function setZoom(on){ scope=on; zoomBtn.classList.toggle('on', on); }
+zoomBtn.addEventListener('click', e=>{ e.preventDefault(); setZoom(!scope); });
+
+// ---------- overlay / flow ----------
+const overlay=document.getElementById('overlay');
+function gameOver(){
+  state='over';
+  const best=Math.max(score, +(localStorage.getItem('ringer_best')||0));
+  localStorage.setItem('ringer_best', best);
+  overlay.innerHTML=`
+    <h1 style="font-size:56px">TIME OUT</h1>
+    <div class="statgrid"><div><b>${level}</b>level reached</div><div><b>${score}</b>score</div><div><b>${best}</b>best</div></div>
+    <p class="sub">The crowd swallowed your mark.</p>
+    <button id="againBtn">HUNT AGAIN</button>`;
+  overlay.classList.remove('hidden');
+  document.getElementById('againBtn').onclick=startGame;
+}
+document.getElementById('startBtn').onclick=startGame;
+window.addEventListener('keydown', e=>{ if((state==='title'||state==='over')&&(e.key===' '||e.key==='Enter')) startGame(); });
+
+if(location.search.includes('debug')) window.__ringer={get t(){return crowd.find(a=>a.isTarget)}, get s(){return {level, zones:zones.length, poles:poles.length, crowd:crowd.length, arena:arena.name}}, start:startGame, to(n){ state='play'; overlay.classList.add('hidden'); level=n; buildLevel(); }, pop(){ train.dir=1; train.x=-train.len*0.35; train.active=true; }};
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
