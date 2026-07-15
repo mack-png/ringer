@@ -1,5 +1,7 @@
-FROM nginx:alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY index.html /usr/share/nginx/html/index.html
-COPY levels/ /usr/share/nginx/html/levels/
+FROM node:22-alpine
+WORKDIR /app
+COPY server.js index.html ./
+COPY levels/ ./levels/
+ENV PORT=8080 DB_PATH=/data/scores.json
 EXPOSE 8080
+CMD ["node", "server.js"]

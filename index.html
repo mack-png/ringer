@@ -85,6 +85,33 @@
   button:active{transform:translateY(2px) scale(.98);}
   .statgrid{display:flex; gap:26px; opacity:.85; font-size:13px;}
   .statgrid b{display:block; font-size:24px; margin-bottom:2px;}
+  /* leaderboard + social */
+  #overlay .grpLine{ font-size:12px; opacity:.6; letter-spacing:.04em; }
+  #overlay .grpLine b{ color:#ffd15c; letter-spacing:.12em; }
+  #overlay .grpLine a{ color:#9fd0ff; text-decoration:underline; cursor:pointer; }
+  .nameRow{ display:flex; gap:8px; }
+  .nameRow input{ font-family:inherit; font-size:14px; padding:9px 12px; border-radius:10px;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.2); color:var(--paper); width:180px; outline:none; }
+  .nameRow input::placeholder{ color:rgba(244,239,230,.4); }
+  .nameRow button{ padding:9px 18px; font-size:13px; }
+  .lbBox{ width:min(340px,80vw); background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+    border-radius:12px; padding:10px 12px; }
+  .lbHead{ font-size:10px; letter-spacing:.16em; opacity:.55; margin-bottom:6px; }
+  .lbHead b{ color:#ffd15c; }
+  .lbEmpty{ font-size:12px; opacity:.55; line-height:1.5; padding:6px 2px; }
+  ol.lb{ list-style:none; display:flex; flex-direction:column; gap:2px; max-height:190px; overflow-y:auto; }
+  ol.lb li{ display:flex; align-items:center; gap:10px; font-size:13px; padding:4px 6px; border-radius:6px; }
+  ol.lb li.me{ background:rgba(255,209,92,.16); }
+  ol.lb .rk{ width:20px; text-align:right; opacity:.5; font-size:11px; }
+  ol.lb .nm{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  ol.lb li.me .nm{ color:#ffd15c; font-weight:700; }
+  ol.lb .sc{ font-variant-numeric:tabular-nums; font-weight:700; }
+  .goBtns{ display:flex; gap:10px; align-items:center; }
+  button.ghost{ background:transparent; color:var(--paper); border:1.5px solid rgba(255,255,255,.3); box-shadow:none; }
+  #toast{ position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(20px);
+    background:#10131a; color:var(--paper); border:1px solid rgba(255,255,255,.2); padding:10px 18px;
+    border-radius:999px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:50; max-width:90vw; }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -112,9 +139,9 @@
     <p class="tagline">ONE HUNT A DAY</p>
     <h1><span class="r">R</span>INGER</h1>
     <p class="rules">You're shown one face. <b>Find the exact match</b> in the crowd and click it before the clock runs out — they peek from windows &amp; tanks and duck behind pillars. Hold <kbd>SHIFT</kbd> (or tap <b>⊕</b>) to zoom.</p>
-    <div class="avg">TODAY'S AVERAGE SCORE<b id="todayAvg">—</b></div>
+    <div class="avg"><span class="avgLabel">TODAY'S AVERAGE SCORE</span><b id="todayAvg">—</b></div>
     <button id="startBtn">START TODAY'S HUNT</button>
-    <p class="fineprint">A fresh crowd every day.</p>
+    <p class="grpLine" id="grpLine"></p>
     </div>
   </div>
 </div>
@@ -136,8 +163,11 @@ fit(); window.addEventListener('resize', fit);
 
 // ---------- rng ----------
 let seed = 1234567;
-function rng(){ seed=(seed*1664525+1013904223)>>>0; return seed/4294967296; }
+function rng(){ seed=(seed*1664525+1013904223)>>>0; return seed/4294967296; }  // deterministic — seeded by the day, drives crowd generation
+function rnd(){ return Math.random(); }                                         // cosmetic only — movement/jostling/train/placement
 function pick(a){ return a[Math.floor(rng()*a.length)]; }
+function utcDayStr(){ const d=new Date(); return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0'); }
+function hashStr(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
 
 // ---------- character genetics ----------
 const SKIN  = ['#f2c9a0','#e0a878','#c78b5c','#9c6b43','#6f492e','#8fd0c0','#d9a3c9','#f7dcc0','#b5764a'];
@@ -366,7 +396,7 @@ function dailyAverage(){
 const TODAY_AVG = dailyAverage();
 const fmt = n => n.toLocaleString('en-US');
 
-function startGame(){ level=1; score=0; seed=(Date.now()>>>0)^0x9e3779b9; buildLevel(); state='play'; overlay.classList.add('hidden'); }
+function startGame(){ level=1; score=0; seed=hashStr(utcDayStr()); buildLevel(); state='play'; overlay.classList.add('hidden'); }
 
 function buildLevel(){
   arena = arenaFor(level);
@@ -399,23 +429,23 @@ function buildLevel(){
   // guarantee no OTHER exact match
   for(const a of crowd){ if(!a.isTarget && sameChar(a,target)){ const m=mutate(target,1+Math.floor(rng()*2)); for(const [k] of GENES) a[k]=m[k]; } }
   timeLeft=levelDur; wrongCooldown=0;
-  train.active=false; train.cool = 4 + rng()*6;   // first train after a few seconds
+  train.active=false; train.cool = 4 + rnd()*6;   // first train after a few seconds
   drawTargetWindow(); updateHud();
 }
 
 function makeAgent(c, zone, roam){
   // scale to fit the zone (for cutout cells) or free size (open floor)
   let s;
-  if(roam){ s = 0.82+rng()*0.34; }
+  if(roam){ s = 0.82+rnd()*0.34; }
   else{ s = Math.min(zone.h*0.62/54, zone.w*0.9/26); s=Math.max(0.5,Math.min(1.12,s)); }
   const padX=13*s, padTop=30*s, padBot=22*s;
   const a={ ...c, zone, roam, s, padX, padTop, padBot,
-    phase:rng()*Math.PI*2, spd:0.6+rng()*0.8 };
-  // place inside zone
-  const rx = Math.max(zone.x+padX, Math.min(zone.x+zone.w-padX, zone.x+padX+rng()*(zone.w-2*padX)));
-  const ry = Math.max(zone.y+padTop, Math.min(zone.y+zone.h-padBot, zone.y+padTop+rng()*(zone.h-padTop-padBot)));
+    phase:rnd()*Math.PI*2, spd:0.6+rnd()*0.8 };
+  // place inside zone (cosmetic — positions may differ per client, difficulty does not)
+  const rx = Math.max(zone.x+padX, Math.min(zone.x+zone.w-padX, zone.x+padX+rnd()*(zone.w-2*padX)));
+  const ry = Math.max(zone.y+padTop, Math.min(zone.y+zone.h-padBot, zone.y+padTop+rnd()*(zone.h-padTop-padBot)));
   a.x=rx; a.y=ry;
-  a.vx=(rng()-0.5)*(roam?22:10); a.vy=(rng()-0.5)*(roam?22:10);
+  a.vx=(rnd()-0.5)*(roam?22:10); a.vy=(rnd()-0.5)*(roam?22:10);
   return a;
 }
 
@@ -441,7 +471,7 @@ function update(dt){
   for(const a of crowd){
     a.x+=a.vx*dt; a.y+=a.vy*dt;
     const wob = a.roam?40:26;
-    a.vx+=(rng()-0.5)*wob*dt; a.vy+=(rng()-0.5)*wob*dt;
+    a.vx+=(rnd()-0.5)*wob*dt; a.vy+=(rnd()-0.5)*wob*dt;
     const sp=Math.hypot(a.vx,a.vy), m=a.roam?maxS:14;
     if(sp>m){ a.vx=a.vx/sp*m; a.vy=a.vy/sp*m; }
     // clamp to home zone with padding so the character stays fully framed
@@ -456,9 +486,9 @@ function update(dt){
   if(arena.hasTrain){
     if(train.active){
       train.x += train.dir*train.speed*dt;
-      if((train.dir>0 && train.x>W) || (train.dir<0 && train.x+train.len<0)){ train.active=false; train.cool = 7 + rng()*8; }
+      if((train.dir>0 && train.x>W) || (train.dir<0 && train.x+train.len<0)){ train.active=false; train.cool = 7 + rnd()*8; }
     } else if((train.cool-=dt) <= 0){
-      train.dir = rng()<0.5?1:-1;
+      train.dir = rnd()<0.5?1:-1;
       train.x = train.dir>0 ? -train.len : W;
       train.active = true;
     }
@@ -504,7 +534,19 @@ function drawScene(g,t){
   g.beginPath();
   for(const h of (doCut?holes:zones)) g.rect(h.x,h.y,h.w,h.h);
   g.clip();
-  for(const a of crowd){ const bob=Math.sin(t*a.spd*3+a.phase)*(a.roam?2.2:1.2); drawChar(g,a,a.x,a.y,a.s,bob); }
+  const hintOn = state==='play' && (levelDur-timeLeft)>=10;   // struggling? reveal the target
+  for(const a of crowd){
+    const bob=Math.sin(t*a.spd*3+a.phase)*(a.roam?2.2:1.2);
+    drawChar(g,a,a.x,a.y,a.s,bob);
+    if(hintOn && a.isTarget){
+      const fl=0.30+0.70*Math.abs(Math.sin(t*13));            // pulsing white flicker
+      g.save(); g.globalAlpha=fl; g.fillStyle='#ffffff';
+      const s=a.s, y=a.y+bob;
+      g.beginPath(); g.arc(a.x, y-7*s, 11.6*s, 0, 7); g.fill();               // head
+      roundRect(g, a.x-11.5*s, y+2*s, 23*s, 20.5*s, 6*s); g.fill();           // body
+      g.restore();
+    }
+  }
   g.restore();
   // facade back on top: wall + frames occlude the crowd; the punched holes stay open
   if(doCut) g.drawImage(arena._front,0,0,W,H);
@@ -593,28 +635,102 @@ const zoomBtn=document.getElementById('zoomBtn');
 function setZoom(on){ scope=on; zoomBtn.classList.toggle('on', on); }
 zoomBtn.addEventListener('click', e=>{ e.preventDefault(); setZoom(!scope); });
 
+// ---------- identity + friend leaderboard ----------
+const LS=window.localStorage;
+let playerId=LS.getItem('ringer_pid');
+if(!playerId){ playerId='p'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); LS.setItem('ringer_pid',playerId); }
+let playerName=LS.getItem('ringer_name')||'';
+function newGroupCode(){ const A='ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let s=''; for(let i=0;i<5;i++) s+=A[Math.floor(Math.random()*A.length)]; return s; }
+let group=((new URLSearchParams(location.search).get('g'))||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,12);
+if(group) LS.setItem('ringer_group',group);                 // opened a friend's invite → join their group
+group = group || LS.getItem('ringer_group') || newGroupCode();
+LS.setItem('ringer_group',group);
+const inviteLink = ()=> location.origin+'/?g='+group;
+function escapeHTML(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function postScore(){
+  try{ const r=await fetch('/api/score',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({group,playerId,name:playerName||'anon',score,level})}); return await r.json(); }
+  catch(e){ return null; }
+}
+async function getBoard(){
+  try{ const r=await fetch('/api/board?group='+encodeURIComponent(group)+'&pid='+encodeURIComponent(playerId)); return await r.json(); }
+  catch(e){ return null; }
+}
+function boardHTML(bd){
+  if(!bd || !bd.rows || !bd.rows.length) return '<div class="lbEmpty">No scores yet today — you’re first. Invite friends with your code.</div>';
+  return '<ol class="lb">'+bd.rows.map((r,i)=>`<li class="${r.you?'me':''}"><span class="rk">${i+1}</span><span class="nm">${escapeHTML(r.name)}</span><span class="sc">${fmt(r.score)}</span></li>`).join('')+'</ol>';
+}
+function toast(msg){
+  let t=document.getElementById('toast'); if(!t){ t=document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
+  t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800);
+}
+async function shareResult(){
+  const text=`RINGER — today’s hunt\nScore ${fmt(score)} · reached level ${level}\nBeat me → ${inviteLink()}`;
+  if(navigator.share){ try{ await navigator.share({title:'RINGER',text}); return; }catch(e){ if(e && e.name==='AbortError') return; } }
+  try{ await navigator.clipboard.writeText(text); toast('Result + invite copied'); }catch(e){ toast(text); }
+}
+async function shareInvite(){
+  const text=`Play today’s RINGER hunt with me → ${inviteLink()}`;
+  if(navigator.share){ try{ await navigator.share({title:'RINGER',text}); return; }catch(e){ if(e && e.name==='AbortError') return; } }
+  try{ await navigator.clipboard.writeText(inviteLink()); toast('Invite link copied'); }catch(e){ toast(inviteLink()); }
+}
+function updateTitleAvg(bd){
+  const el=document.getElementById('todayAvg'); if(!el||!bd||!bd.count) return;
+  el.textContent=fmt(bd.average);
+  const lab=el.parentElement.querySelector('.avgLabel'); if(lab) lab.textContent = bd.count>1?`AVERAGE OF ${bd.count} FRIENDS TODAY`:'YOUR SCORE TODAY';
+}
+
 // ---------- overlay / flow ----------
 const overlay=document.getElementById('overlay');
-function gameOver(){
+async function gameOver(){
   state='over';
-  const best=Math.max(score, +(localStorage.getItem('ringer_best')||0));
-  localStorage.setItem('ringer_best', best);
-  const beat = score>=TODAY_AVG;
+  const best=Math.max(score, +(LS.getItem('ringer_best')||0));
+  LS.setItem('ringer_best', best);
   overlay.innerHTML=`
     <p class="tagline">TODAY'S HUNT · OVER</p>
-    <h1 style="font-size:50px">${beat?'NICE HUNTING':'TIME OUT'}</h1>
-    <div class="statgrid"><div><b>${fmt(score)}</b>your score</div><div><b>${fmt(TODAY_AVG)}</b>today's avg</div><div><b>${fmt(best)}</b>your best</div></div>
-    <p class="sub">${beat?"You beat today's average.":"The crowd swallowed your mark."} &nbsp;Reached level ${level}.</p>
-    <p class="fineprint">A fresh crowd arrives tomorrow.</p>
-    <button id="againBtn">HUNT AGAIN</button>`;
+    <h1 id="goTitle" style="font-size:46px">TIME OUT</h1>
+    <div class="statgrid"><div><b>${fmt(score)}</b>your score</div><div><b id="goRank">—</b>your rank</div><div><b>lvl ${level}</b>reached</div></div>
+    <div id="nameRow" class="nameRow" style="display:${playerName?'none':'flex'}">
+      <input id="nameInput" maxlength="20" placeholder="your name" value="${escapeHTML(playerName)}" autocomplete="off">
+      <button id="postBtn">POST</button>
+    </div>
+    <div class="lbBox">
+      <div class="lbHead">FRIENDS · CODE <b>${group}</b></div>
+      <div id="lbList"><div class="lbEmpty">posting…</div></div>
+    </div>
+    <div class="goBtns"><button id="shareBtn" class="ghost">SHARE RESULT</button><button id="againBtn">HUNT AGAIN</button></div>
+    <p class="fineprint">A fresh crowd arrives tomorrow.</p>`;
   overlay.classList.remove('hidden');
   document.getElementById('againBtn').onclick=startGame;
+  document.getElementById('shareBtn').onclick=shareResult;
+  async function doPost(){
+    const inp=document.getElementById('nameInput');
+    if(inp){ playerName=(inp.value||'').trim().slice(0,20)||'anon'; LS.setItem('ringer_name',playerName); document.getElementById('nameRow').style.display='none'; }
+    document.getElementById('lbList').innerHTML='<div class="lbEmpty">posting…</div>';
+    const res=await postScore();
+    const bd=res||await getBoard();
+    if(bd){
+      if(res&&res.rank) document.getElementById('goRank').textContent='#'+res.rank;
+      document.getElementById('lbList').innerHTML=boardHTML(bd);
+      updateTitleAvg(bd);
+      if(bd.count>1 && score>=bd.average) document.getElementById('goTitle').textContent='NICE HUNTING';
+    } else { document.getElementById('lbList').innerHTML='<div class="lbEmpty">offline — score not posted</div>'; }
+  }
+  const pb=document.getElementById('postBtn'); if(pb) pb.onclick=doPost;
+  if(playerName) doPost();                 // auto-post when we already know the name
 }
 document.getElementById('todayAvg').textContent=fmt(TODAY_AVG);
 document.getElementById('startBtn').onclick=startGame;
+(function initTitle(){
+  const gl=document.getElementById('grpLine');
+  if(gl){ gl.innerHTML=`Friends code <b>${group}</b> · <a href="#" id="titleInvite">invite friends</a>`;
+    const a=document.getElementById('titleInvite'); if(a) a.onclick=(e)=>{e.preventDefault(); shareInvite();}; }
+  getBoard().then(bd=>{ if(bd) updateTitleAvg(bd); });
+})();
 window.addEventListener('keydown', e=>{ if((state==='title'||state==='over')&&(e.key===' '||e.key==='Enter')) startGame(); });
 
-if(location.search.includes('debug')) window.__ringer={get t(){return crowd.find(a=>a.isTarget)}, get s(){return {level, zones:zones.length, poles:poles.length, crowd:crowd.length, arena:arena.name}}, start:startGame, to(n){ state='play'; overlay.classList.add('hidden'); level=n; buildLevel(); }, pop(){ train.dir=1; train.x=-train.len*0.35; train.active=true; }};
+if(location.search.includes('debug')) window.__ringer={get t(){return crowd.find(a=>a.isTarget)}, get s(){return {level, zones:zones.length, poles:poles.length, crowd:crowd.length, arena:arena.name}}, start:startGame, to(n){ state='play'; overlay.classList.add('hidden'); level=n; buildLevel(); }, pop(){ train.dir=1; train.x=-train.len*0.35; train.active=true; }, end(sc,lv){ score=sc||score; level=lv||level; gameOver(); }, grp(){return group;} };
 
 requestAnimationFrame(loop);
 </script>
