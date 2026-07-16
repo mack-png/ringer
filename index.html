@@ -15,10 +15,10 @@
     overflow:hidden; user-select:none; -webkit-user-select:none; touch-action:none;
   }
   #wrap{
-    position:relative; width:min(100vw, 1000px); max-height:100vh;
-    display:flex; flex-direction:column; gap:8px; padding:8px;
+    position:relative; height:100vh; height:100dvh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:6px;
   }
-  #stage{ position:relative; width:100%; aspect-ratio: 5 / 3; }
+  #stage{ position:relative; width:100%; aspect-ratio: 9 / 16; }
   #game{
     position:absolute; inset:0; width:100%; height:100%;
     border-radius:14px; cursor: crosshair;
@@ -158,14 +158,22 @@ const ctx = cv.getContext('2d');
 const tcv = document.getElementById('targetCanvas');
 const tctx = tcv.getContext('2d');
 
-const W = 1000, H = 600;
+const W = 720, H = 1280;                       // portrait (9:16) — phone / Telegram Mini App
 let DPR = Math.min(window.devicePixelRatio || 1, 2);
 function fit(){
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   cv.width = W*DPR; cv.height = H*DPR;
   ctx.setTransform(DPR,0,0,DPR,0,0);
 }
-fit(); window.addEventListener('resize', fit);
+function layout(){
+  const hud=document.getElementById('hud'), stage=document.getElementById('stage');
+  const availW = Math.min(window.innerWidth-12, 540);
+  const availH = window.innerHeight - hud.offsetHeight - 20;
+  const sw = Math.max(200, Math.min(availW, availH*(W/H)));
+  stage.style.width=sw+'px'; stage.style.height=(sw*H/W)+'px';
+  hud.style.width=sw+'px';
+}
+fit(); window.addEventListener('resize', ()=>{ fit(); layout(); });
 
 // ---------- rng ----------
 let seed = 1234567;
@@ -388,56 +396,59 @@ function grid(count, area, cellAspect){
   return cells;
 }
 
+// portrait 720x1280 — three vertical cutout arenas. Zone rects are placeholder
+// grids; refined to each MJ image via pixel detection once the art is in.
+function gridZones(cols,rows,x0,y0,cw,ch,gx,gy){ const z=[]; for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) z.push({x:Math.round(x0+c*(cw+gx)),y:Math.round(y0+r*(ch+gy)),w:cw,h:ch}); return z; }
 const ARENAS = [
-  { // ---- 1. ROWHOUSE : crowd only appears in the painted windows + door ----
-    name:'Night Windows', cutout:true, img:'ringer_building', frameInset:8, scrim:'rgba(14,14,26,0.34)',
+  { // ---- 1. THE TOWER : crowd only appears in the lit windows + door ----
+    name:'The Tower', cutout:true, img:'spotted_tower', frameInset:8, scrim:'rgba(14,14,26,0.34)',
     build(){
-      // measured from the art (pixel-detected window openings)
-      const cols=[[114,79],[234,78],[348,75],[455,106],[596,69],[700,83],[814,83]]; // [x, w]
-      const rows=[[32,94],[151,94],[272,93]];                                        // [y, h] — top three floors
-      const z=[];
-      for(const [y,h] of rows) for(const [x,w] of cols) z.push({x,y,w,h});
-      z.push({x:449, y:445, w:118, h:165, door:true});                               // central doorway
+      const cx=[99,189,285,437,533,620];                                  // 6 window columns (measured)
+      const rows=[40,162,286,408,530,652,774,896,1020];                    // 9 floors
+      const w=44,h=80, z=[];
+      for(const y of rows) for(const c of cx) z.push({x:c-w/2,y,w,h});
+      z.push({x:322,y:1142,w:76,h:128,door:true});                         // ground-floor door
       return { zones:z, poles:[], count:z.length };
     },
     paintFallback(g){
-      g.fillStyle='#243b6b'; g.fillRect(0,0,W,H*0.30);
-      const brick=g.createLinearGradient(0,H*0.15,0,H); brick.addColorStop(0,'#b0503f'); brick.addColorStop(1,'#8a3a2e');
-      g.fillStyle=brick; g.fillRect(0,H*0.15,W,H);
-      for(const z of zones){ g.fillStyle='#efe3cf'; roundRect(g,z.x-6,z.y-6,z.w+12,z.h+12,8); g.fill(); g.fillStyle=z.door?'#2a1c15':'#141a26'; roundRect(g,z.x,z.y,z.w,z.h,6); g.fill(); }
+      g.fillStyle='#20263a'; g.fillRect(0,0,W,H);
+      for(const z of zones){ g.fillStyle='#2c3550'; roundRect(g,z.x-6,z.y-6,z.w+12,z.h+12,6); g.fill(); g.fillStyle=z.door?'#241a12':'#f2d97a'; roundRect(g,z.x,z.y,z.w,z.h,4); g.fill(); }
     }
   },
-  { // ---- 2. STATION : open platform, crowd walks BEHIND the columns ----
-    name:'Central Station', cutout:false, open:true, img:'ringer_station', hasTrain:true,
-    build(level){
-      const floor={x:26, y:206, w:948, h:170};
-      const poles=[100,305,520,730,950].map(cx=>({x:cx-44, y:120, w:88, h:260}));
-      return { zones:[floor], poles, count:Math.min(150, 26+level*8) };
-    },
+  { // ---- 2. THE AQUARIUM : glowing tanks drawn AT the zones (self-aligned) ----
+    name:'The Aquarium', cutout:true, frameInset:6,
+    build(){ const z=gridZones(3,6, 62,120, 180,150, 44,40); return { zones:z, poles:[], count:z.length }; },
     paintFallback(g){
-      const wall=g.createLinearGradient(0,0,0,H*0.5); wall.addColorStop(0,'#2c3550'); wall.addColorStop(1,'#4a5a7d');
-      g.fillStyle=wall; g.fillRect(0,0,W,H*0.55);
-      const floorG=g.createLinearGradient(0,H*0.5,0,H); floorG.addColorStop(0,'#cfd6dd'); floorG.addColorStop(1,'#9aa3ad');
-      g.fillStyle=floorG; g.fillRect(0,H*0.5,W,H*0.5);
-    },
-    poleFallback(g){
-      for(const p of poles){ const grd=g.createLinearGradient(p.x,0,p.x+p.w,0); grd.addColorStop(0,'#5a636e'); grd.addColorStop(.5,'#aeb7c1'); grd.addColorStop(1,'#5a636e'); g.fillStyle=grd; g.fillRect(p.x,p.y,p.w,p.h); }
-    }
-  },
-  { // ---- 3. AQUARIUM : crowd only appears inside the glowing tanks ----
-    name:'The Aquarium', cutout:true, img:'ringer_aquarium', frameInset:6,
-    build(){
-      // measured from the art — tanks have slight perspective (edge tanks wider)
-      const cx=[136,254,360,458,540,638,744,862];
-      const rows=[[144,84],[274,82],[393,78]];  // [y, h]
-      const w=84; const z=[];
-      for(const [y,h] of rows) for(const c of cx) z.push({x:c-w/2, y, w, h});
-      return { zones:z, poles:[], count:z.length };
-    },
-    paintFallback(g){
-      const room=g.createLinearGradient(0,0,0,H); room.addColorStop(0,'#0a1420'); room.addColorStop(1,'#04080e');
+      const room=g.createLinearGradient(0,0,0,H); room.addColorStop(0,'#08131c'); room.addColorStop(1,'#03060c');
       g.fillStyle=room; g.fillRect(0,0,W,H);
-      for(const z of zones){ const water=g.createLinearGradient(0,z.y,0,z.y+z.h); water.addColorStop(0,'#1f8fb0'); water.addColorStop(1,'#0e5f86'); g.fillStyle=water; roundRect(g,z.x,z.y,z.w,z.h,8); g.fill(); }
+      for(const z of zones){
+        g.fillStyle='#0c1e2a'; roundRect(g,z.x-9,z.y-9,z.w+18,z.h+18,13); g.fill();
+        const water=g.createLinearGradient(0,z.y,0,z.y+z.h); water.addColorStop(0,'#27a9c6'); water.addColorStop(1,'#0d5e83');
+        g.fillStyle=water; roundRect(g,z.x,z.y,z.w,z.h,8); g.fill();
+        const mg=g.createLinearGradient(0,z.y+z.h*0.45,0,z.y+z.h); mg.addColorStop(0,'rgba(214,64,168,0)'); mg.addColorStop(1,'rgba(214,64,168,.5)');
+        g.fillStyle=mg; roundRect(g,z.x,z.y,z.w,z.h,8); g.fill();
+        g.fillStyle='rgba(205,246,255,.6)'; roundRect(g,z.x+5,z.y+4,z.w-10,4,2); g.fill();
+        g.strokeStyle='rgba(150,225,255,.28)'; g.lineWidth=2; roundRect(g,z.x,z.y,z.w,z.h,8); g.stroke();
+      }
+    }
+  },
+  { // ---- 3. THE TV WALL : glowing screens drawn AT the zones (self-aligned) ----
+    name:'The TV Wall', cutout:true, frameInset:9,
+    build(){ const z=gridZones(3,5, 56,130, 186,188, 38,42); return { zones:z, poles:[], count:z.length }; },
+    paintFallback(g){
+      g.fillStyle='#0a0a10'; g.fillRect(0,0,W,H);
+      const cols=['#e0453f','#3a86ff','#2ecc71','#f6c02b','#9b59b6','#1abc9c'];
+      zones.forEach((z,i)=>{
+        g.fillStyle='#14151d'; roundRect(g,z.x-11,z.y-11,z.w+22,z.h+22,16); g.fill();
+        g.fillStyle='#23252f'; roundRect(g,z.x-6,z.y-6,z.w+12,z.h+12,12); g.fill();
+        const col=cols[(i*5+3)%cols.length];
+        const gl=g.createRadialGradient(z.x+z.w/2,z.y+z.h/2,6,z.x+z.w/2,z.y+z.h/2,z.w*0.72);
+        gl.addColorStop(0,shade(col,55)); gl.addColorStop(1,shade(col,-42));
+        g.fillStyle=gl; roundRect(g,z.x,z.y,z.w,z.h,10); g.fill();
+        g.strokeStyle='rgba(0,0,0,.13)'; g.lineWidth=1;
+        for(let y=z.y+5;y<z.y+z.h;y+=5){ g.beginPath(); g.moveTo(z.x,y); g.lineTo(z.x+z.w,y); g.stroke(); }
+        g.strokeStyle='rgba(255,255,255,.14)'; g.lineWidth=2; roundRect(g,z.x,z.y,z.w,z.h,10); g.stroke();
+      });
     }
   },
 ];
@@ -472,7 +483,7 @@ const bctx=buf.getContext('2d');
 
 const DEBUG = location.search.includes('debug');
 const IMAGES = {};
-for(const n of ['ringer_building','ringer_station','ringer_aquarium']){ const im=new Image(); im.src='levels/'+n+'.png'; IMAGES[n]=im; }
+for(const n of ['spotted_tower']){ const im=new Image(); im.src='levels/'+n+'.png'; IMAGES[n]=im; }
 function imgReady(n){ const im=IMAGES[n]; return im && im.complete && im.naturalWidth>0; }
 function insetZone(z,f){ return {x:z.x+f, y:z.y+f, w:Math.max(2,z.w-2*f), h:Math.max(2,z.h-2*f), door:z.door}; }
 // A "front" layer: the facade image with the openings punched transparent, so
@@ -875,6 +886,7 @@ window.addEventListener('keydown', e=>{ if((state==='title'||state==='over')&&(e
 if(location.search.includes('debug')) window.__ringer={get t(){return crowd.find(a=>a.isTarget)}, get s(){return {level, zones:zones.length, poles:poles.length, crowd:crowd.length, arena:arena.name}}, start:startGame, to(n){ state='play'; overlay.classList.add('hidden'); level=n; buildLevel(); }, pop(){ train.dir=1; train.x=-train.len*0.35; train.active=true; }, end(sc,lv){ score=sc||score; level=lv||level; gameOver(); }, grp(){return group;}, tl(v){ timeLeft=v; return {timeLeft,levelDur,crowd:crowd.length}; }, step(n){ for(let i=0;i<(n||1);i++) update(0.1); return {crowd:crowd.length, timeLeft:+timeLeft.toFixed(1)}; }, frame(t){ render(t||1.5); return cv.toDataURL('image/png'); } };
 
 requestAnimationFrame(loop);
+layout();
 </script>
 </body>
 </html>

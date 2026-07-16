@@ -70,6 +70,17 @@ const server = http.createServer((req, res) => {
     return sendJSON(res, board(cleanGroup(q.get('group')), utcDay(), String(q.get('pid') || '')));
   }
 
+  if (u === '/api/_savelevel' && req.method === 'POST' && process.env.SNAP === '1') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try { const o = JSON.parse(body); const name = String(o.name).replace(/[^\w-]/g, '');
+        fs.writeFileSync(path.join(ROOT, 'levels', name + '.png'), Buffer.from(o.data.replace(/^data:image\/png;base64,/, ''), 'base64'));
+        sendJSON(res, { ok: true }); } catch (e) { sendJSON(res, { error: e.message }, 500); }
+    });
+    return;
+  }
+
   if (u === '/api/_snap' && req.method === 'POST' && process.env.SNAP === '1') {
     let body = '';
     req.on('data', c => body += c);
